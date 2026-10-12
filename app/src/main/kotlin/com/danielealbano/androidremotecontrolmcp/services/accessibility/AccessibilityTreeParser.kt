@@ -24,6 +24,9 @@ import javax.inject.Inject
 class AccessibilityTreeParser
     @Inject
     constructor() {
+        /** Reads the diagnostic prefetch switch ([PrefetchStrategySwitch]); replaceable in tests. */
+        internal var readProperty: (String) -> String? = PrefetchStrategySwitch::readSystemProperty
+
         /**
          * Parses the full accessibility tree starting from [rootNode].
          *
@@ -41,15 +44,21 @@ class AccessibilityTreeParser
             rootNode: AccessibilityNodeInfo,
             rootParentId: String = ROOT_PARENT_ID,
             nodeMap: MutableMap<String, CachedNode>? = null,
-        ): AccessibilityNodeData =
-            parseNode(
-                node = rootNode,
-                depth = 0,
-                index = 0,
-                parentId = rootParentId,
-                recycleNode = false,
-                nodeMap = nodeMap,
-            )
+        ): AccessibilityNodeData {
+            val fetch = ChildFetch.fromSwitch(readProperty(PrefetchStrategySwitch.PROPERTY))
+            val tree =
+                parseNode(
+                    node = rootNode,
+                    depth = 0,
+                    index = 0,
+                    parentId = rootParentId,
+                    recycleNode = false,
+                    nodeMap = nodeMap,
+                    fetch = fetch,
+                )
+            fetch.stats?.log(rootNode.packageName?.toString())
+            return tree
+        }
 
         /**
          * Parses a single [AccessibilityNodeInfo] and recursively parses its children.
@@ -63,6 +72,8 @@ class AccessibilityTreeParser
          * @param nodeMap Optional output map for caching real node references. When non-null, the node
          *   is stored as a [CachedNode] and child nodes are not recycled. When null, nodes are recycled
          *   after data extraction per the original behavior.
+         * @param fetch getChild prefetch flags, plus diagnostic counters when the switch is set.
+         * @param fromCache Whether [node] was served from the framework node cache (diagnostics only).
          * @return The parsed node as [AccessibilityNodeData].
          */
         @Suppress("LongParameterList", "LongMethod")
@@ -73,6 +84,8 @@ class AccessibilityTreeParser
             parentId: String,
             recycleNode: Boolean = true,
             nodeMap: MutableMap<String, CachedNode>? = null,
+            fetch: ChildFetch = ChildFetch.DEFAULT,
+            fromCache: Boolean = false,
         ): AccessibilityNodeData {
             val rect = Rect()
             node.getBoundsInScreen(rect)
@@ -158,7 +171,11 @@ class AccessibilityTreeParser
                 // the batch from being cut short by our own next request, so siblings and
                 // grandchildren are then served from the cache instead of one main-thread round
                 // trip each.
-                val childNode = node.getChild(i, CHILD_PREFETCH_STRATEGY)
+                val stats = fetch.stats
+                val startNs = if (stats != null) System.nanoTime() else 0L
+                val childNode = node.getChild(i, fetch.strategy)
+                val childFromCache =
+                    stats?.record(node, fromCache, childNode, System.nanoTime() - startNs) ?: false
                 if (childNode != null) {
                     children.add(
                         parseNode(
@@ -168,6 +185,8 @@ class AccessibilityTreeParser
                             parentId = nodeId,
                             recycleNode = nodeMap == null,
                             nodeMap = nodeMap,
+                            fetch = fetch,
+                            fromCache = childFromCache,
                         ),
                     )
                 }
