@@ -180,11 +180,11 @@ internal class PrefetchStats(
 
         // getSourceNodeId() is @hide @UnsupportedAppUsage @TestApi (greylisted), so reflection works on
         // device; null on failure.
-        private val idGetter by lazy {
+        private val idOf by lazy {
             runCatching { AccessibilityNodeInfo::class.java.getMethod("getSourceNodeId") }.getOrNull()
         }
 
-        fun sourceNodeId(node: AccessibilityNodeInfo): Long? = runCatching { idGetter?.invoke(node) }.getOrNull() as? Long
+        fun sourceNodeId(node: AccessibilityNodeInfo): Long? = runCatching { idOf?.invoke(node) as Long }.getOrNull()
 
         fun viewId(nodeId: Long): Int = nodeId.toInt()
 
