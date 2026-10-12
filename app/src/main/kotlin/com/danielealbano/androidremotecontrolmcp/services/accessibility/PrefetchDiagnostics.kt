@@ -184,7 +184,7 @@ internal class PrefetchStats(
             runCatching { AccessibilityNodeInfo::class.java.getMethod("getSourceNodeId") }.getOrNull()
         }
 
-        fun sourceNodeId(node: AccessibilityNodeInfo): Long? = runCatching { idGetter?.invoke(node) as Long? }.getOrNull()
+        fun sourceNodeId(node: AccessibilityNodeInfo): Long? = runCatching { idGetter?.invoke(node) }.getOrNull() as? Long
 
         fun viewId(nodeId: Long): Int = nodeId.toInt()
 
