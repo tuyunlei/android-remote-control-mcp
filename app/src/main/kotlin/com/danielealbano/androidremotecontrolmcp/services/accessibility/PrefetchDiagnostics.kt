@@ -16,6 +16,10 @@ internal object PrefetchStrategySwitch {
 
     private const val U = AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE
 
+    // AccessibilityNodeInfo.FLAG_PREFETCH_MASK / FLAG_PREFETCH_DESCENDANTS_MASK are @hide.
+    const val PREFETCH_MASK = 0x3F
+    const val DESCENDANTS_MASK = 0x1C
+
     /** Named strategies. "hybrid" is what the no-argument [AccessibilityNodeInfo.getChild] uses. */
     val NAMED: Map<String, Int> =
         mapOf(
@@ -29,7 +33,7 @@ internal object PrefetchStrategySwitch {
 
     /**
      * Returns the prefetch flags for [value], or null to keep the default. Accepts a name from
-     * [NAMED] or a decimal flag set within [AccessibilityNodeInfo.FLAG_PREFETCH_MASK] with at most
+     * [NAMED] or a decimal flag set within [PREFETCH_MASK] with at most
      * one descendant strategy (the framework throws on more than one).
      */
     fun parse(value: String?): Int? {
@@ -38,9 +42,9 @@ internal object PrefetchStrategySwitch {
     }
 
     private fun isAcceptedFlagSet(flags: Int): Boolean {
-        val descendants = flags and AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_MASK
+        val descendants = flags and DESCENDANTS_MASK
         return flags >= 0 &&
-            flags and AccessibilityNodeInfo.FLAG_PREFETCH_MASK.inv() == 0 &&
+            flags and PREFETCH_MASK.inv() == 0 &&
             descendants and (descendants - 1) == 0
     }
 
@@ -125,7 +129,7 @@ internal class PrefetchStats(
         val parentId = sourceNodeId(parent)
         when {
             childId == null -> cs.unknownKind++
-            virtualDescendantId(childId) == AccessibilityNodeInfo.UNDEFINED_ITEM_ID -> cs.real++
+            virtualDescendantId(childId) == UNDEFINED_ITEM_ID -> cs.real++
             else -> cs.virtual++
         }
         if (childId != null && parentId != null && viewId(childId) == viewId(parentId)) {
@@ -171,14 +175,16 @@ internal class PrefetchStats(
         private const val NS_PER_MS = 1_000_000L
         private const val VIRTUAL_DESCENDANT_ID_SHIFT = 32
 
+        /** Virtual id of a real View's node (AccessibilityNodeInfo.UNDEFINED_ITEM_ID, @hide). */
+        const val UNDEFINED_ITEM_ID = Int.MAX_VALUE
+
         // getSourceNodeId() is @hide @UnsupportedAppUsage @TestApi (greylisted), so reflection works on
         // device; null on failure.
-        private val getSourceNodeId by lazy {
+        private val idGetter by lazy {
             runCatching { AccessibilityNodeInfo::class.java.getMethod("getSourceNodeId") }.getOrNull()
         }
 
-        fun sourceNodeId(node: AccessibilityNodeInfo): Long? =
-            runCatching { getSourceNodeId?.invoke(node) as Long? }.getOrNull()
+        fun sourceNodeId(node: AccessibilityNodeInfo): Long? = runCatching { idGetter?.invoke(node) as Long? }.getOrNull()
 
         fun viewId(nodeId: Long): Int = nodeId.toInt()
 

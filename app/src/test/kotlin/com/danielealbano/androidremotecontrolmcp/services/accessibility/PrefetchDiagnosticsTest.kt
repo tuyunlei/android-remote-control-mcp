@@ -192,9 +192,9 @@ class PrefetchDiagnosticsTest {
 
         @Test
         fun `node id helpers split view id and virtual id`() {
-            val realId = (AccessibilityNodeInfo.UNDEFINED_ITEM_ID.toLong() shl 32) or 1234L
+            val realId = (PrefetchStats.UNDEFINED_ITEM_ID.toLong() shl 32) or 1234L
             assertEquals(1234, PrefetchStats.viewId(realId))
-            assertEquals(AccessibilityNodeInfo.UNDEFINED_ITEM_ID, PrefetchStats.virtualDescendantId(realId))
+            assertEquals(PrefetchStats.UNDEFINED_ITEM_ID, PrefetchStats.virtualDescendantId(realId))
             val virtualId = (7L shl 32) or 1234L
             assertEquals(7, PrefetchStats.virtualDescendantId(virtualId))
             val hostId = (-1L shl 32) or 1234L
