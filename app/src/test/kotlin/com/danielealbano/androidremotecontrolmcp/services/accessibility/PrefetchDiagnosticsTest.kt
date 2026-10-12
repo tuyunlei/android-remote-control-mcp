@@ -134,6 +134,20 @@ class PrefetchDiagnosticsTest {
         }
 
         @Test
+        fun `recheck is not issued for cache hits and is off unless set to 1`() {
+            val parent = parentOf(leaf())
+            AccessibilityTreeParser()
+                .apply {
+                    readProperty = { key -> if (key == PrefetchStrategySwitch.PROPERTY) "bfs" else "1" }
+                }.parseTree(parent)
+            // relaxed mocks answer instantly, so the first call is classified a hit: no recheck
+            verify(exactly = 1) { parent.getChild(0, bfsU) }
+            verify(exactly = 0) { parent.getChild(0, 0) }
+            assertEquals(true, ChildFetch.fromSwitch("bfs", "1").stats?.recheck)
+            assertEquals(false, ChildFetch.fromSwitch("bfs", null).stats?.recheck)
+        }
+
+        @Test
         fun `none value fetches children without prefetch`() {
             val parent = parseWith("none")
             verify(exactly = 1) { parent.getChild(0, 0) }
@@ -191,15 +205,28 @@ class PrefetchDiagnosticsTest {
         }
 
         @Test
+        fun `recheck timings are attributed to the last missed class`() {
+            val stats = PrefetchStats("dfs", 40, recheck = true)
+            stats.recordRecheck(5_000_000L) // before any miss: ignored
+            stats.record(node("P"), true, node("A"), 3_000_000L)
+            stats.recordRecheck(20_000L)
+            stats.record(node("P"), true, node("A"), 3_000_000L)
+            stats.recordRecheck(4_000_000L)
+
+            val classA = stats.byClass.getValue("A")
+            assertEquals(1, classA.recheckHit)
+            assertEquals(1, classA.recheckMiss)
+        }
+
+        @Test
         fun `node id helpers split view id and virtual id`() {
-            val realId = (PrefetchStats.UNDEFINED_ITEM_ID.toLong() shl 32) or 1234L
+            // makeNodeId(viewId, HOST_VIEW_ID): what View.createAccessibilityNodeInfo produces
+            val realId = (PrefetchStats.HOST_VIEW_ID.toLong() shl 32) or 1234L
             assertEquals(1234, PrefetchStats.viewId(realId))
-            assertEquals(PrefetchStats.UNDEFINED_ITEM_ID, PrefetchStats.virtualDescendantId(realId))
+            assertEquals(PrefetchStats.HOST_VIEW_ID, PrefetchStats.virtualDescendantId(realId))
             val virtualId = (7L shl 32) or 1234L
             assertEquals(7, PrefetchStats.virtualDescendantId(virtualId))
-            val hostId = (-1L shl 32) or 1234L
-            assertEquals(-1, PrefetchStats.virtualDescendantId(hostId))
-            assertEquals(1234, PrefetchStats.viewId(hostId))
+            assertEquals(1234, PrefetchStats.viewId(virtualId))
         }
 
         @Test

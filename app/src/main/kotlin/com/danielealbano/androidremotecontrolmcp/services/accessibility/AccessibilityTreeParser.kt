@@ -45,7 +45,11 @@ class AccessibilityTreeParser
             rootParentId: String = ROOT_PARENT_ID,
             nodeMap: MutableMap<String, CachedNode>? = null,
         ): AccessibilityNodeData {
-            val fetch = ChildFetch.fromSwitch(readProperty(PrefetchStrategySwitch.PROPERTY))
+            val fetch =
+                ChildFetch.fromSwitch(
+                    readProperty(PrefetchStrategySwitch.PROPERTY),
+                    readProperty(PrefetchStrategySwitch.PROPERTY_RECHECK),
+                )
             val tree =
                 parseNode(
                     node = rootNode,
@@ -176,6 +180,11 @@ class AccessibilityTreeParser
                 val childNode = node.getChild(i, fetch.strategy)
                 val childFromCache =
                     stats?.record(node, fromCache, childNode, System.nanoTime() - startNs) ?: false
+                if (stats?.recheck == true && childNode != null && !childFromCache) {
+                    val recheckStartNs = System.nanoTime()
+                    node.getChild(i, 0)
+                    stats.recordRecheck(System.nanoTime() - recheckStartNs)
+                }
                 if (childNode != null) {
                     children.add(
                         parseNode(

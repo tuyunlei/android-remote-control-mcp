@@ -14,6 +14,15 @@ import android.view.accessibility.AccessibilityNodeInfo
 internal object PrefetchStrategySwitch {
     const val PROPERTY = "debug.arc.prefetch"
 
+    /**
+     * When "1" (and [PROPERTY] is set), every miss is followed by a second getChild of the same
+     * index without prefetch. If the first reply was cached under the id the parent lists, the
+     * second call is a cache hit; a second miss means the app answered with a node whose source id
+     * differs from the parent's child id (or the cache dropped it), so it can never be served
+     * from cache.
+     */
+    const val PROPERTY_RECHECK = "debug.arc.prefetch.recheck"
+
     private const val U = AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE
 
     // AccessibilityNodeInfo.FLAG_PREFETCH_MASK / FLAG_PREFETCH_DESCENDANTS_MASK are @hide.
@@ -68,6 +77,7 @@ internal object PrefetchStrategySwitch {
 internal class PrefetchStats(
     private val strategyName: String,
     private val strategyFlags: Int,
+    val recheck: Boolean = false,
 ) {
     internal class ClassStats {
         var misses = 0
@@ -80,6 +90,8 @@ internal class PrefetchStats(
         var visible = 0
         var withChildren = 0
         var parentFromCache = 0
+        var recheckHit = 0
+        var recheckMiss = 0
     }
 
     var getChildCalls = 0
@@ -143,7 +155,7 @@ internal class PrefetchStats(
         val parentId = sourceNodeId(parent)
         when {
             childId == null -> cs.unknownKind++
-            virtualDescendantId(childId) == UNDEFINED_ITEM_ID -> cs.real++
+            virtualDescendantId(childId) == HOST_VIEW_ID -> cs.real++
             else -> cs.virtual++
         }
         if (childId != null && parentId != null && viewId(childId) == viewId(parentId)) {
@@ -152,6 +164,12 @@ internal class PrefetchStats(
         if (child.isVisibleToUser) cs.visible++
         if (child.childCount > 0) cs.withChildren++
         if (parentFromCache) cs.parentFromCache++
+    }
+
+    /** Records the timing of the no-prefetch repeat of the last missed getChild. */
+    fun recordRecheck(elapsedNs: Long) {
+        val cs = lastMissClass ?: return
+        if (elapsedNs < MISS_THRESHOLD_NS) cs.recheckHit++ else cs.recheckMiss++
     }
 
     fun log(packageName: String?) {
@@ -163,7 +181,8 @@ internal class PrefetchStats(
     }
 
     fun summaryLine(packageName: String?): String =
-        "read pkg=$packageName strategy=$strategyName flags=$strategyFlags calls=$getChildCalls " +
+        "read pkg=$packageName strategy=$strategyName flags=$strategyFlags recheck=$recheck " +
+            "calls=$getChildCalls " +
             "misses=$misses hits=$hits null=$nullChildren missMs=${missNs / NS_PER_MS} " +
             "hist=${histogram.joinToString(",")}"
 
@@ -174,7 +193,7 @@ internal class PrefetchStats(
         "class cls=$cls misses=${s.misses} missMs=${s.missNs / NS_PER_MS} served=${s.served} " +
             "real=${s.real} virtual=${s.virtual} unknownKind=${s.unknownKind} " +
             "sameHost=${s.sameHostAsParent} visible=${s.visible} withChildren=${s.withChildren} " +
-            "parentFromCache=${s.parentFromCache}"
+            "parentFromCache=${s.parentFromCache} recheckHit=${s.recheckHit} recheckMiss=${s.recheckMiss}"
 
     companion object {
         const val TAG = "ARC_PREFETCH"
@@ -188,8 +207,12 @@ internal class PrefetchStats(
         private const val NS_PER_MS = 1_000_000L
         private const val VIRTUAL_DESCENDANT_ID_SHIFT = 32
 
-        /** Virtual id of a real View's node (AccessibilityNodeInfo.UNDEFINED_ITEM_ID, @hide). */
-        const val UNDEFINED_ITEM_ID = Int.MAX_VALUE
+        /**
+         * Virtual id in the source id of a real View's node: View.createAccessibilityNodeInfo uses
+         * setSource(view) = setSource(view, AccessibilityNodeProvider.HOST_VIEW_ID). A provider host
+         * reports the same; provider-built descendants carry their own virtual id.
+         */
+        const val HOST_VIEW_ID = -1
 
         // getSourceNodeId() is @hide @UnsupportedAppUsage @TestApi (greylisted), so reflection works on
         // device; null on failure.
@@ -214,9 +237,13 @@ internal class ChildFetch(
         val DEFAULT = ChildFetch(AccessibilityTreeParser.CHILD_PREFETCH_STRATEGY, null)
 
         /** [ChildFetch] for the switch value [raw]: [DEFAULT] when unset or unrecognised. */
-        fun fromSwitch(raw: String?): ChildFetch {
+        fun fromSwitch(
+            raw: String?,
+            recheckRaw: String? = null,
+        ): ChildFetch {
             val flags = PrefetchStrategySwitch.parse(raw) ?: return DEFAULT
-            return ChildFetch(flags, PrefetchStats(raw.orEmpty().trim().lowercase(), flags))
+            val stats = PrefetchStats(raw.orEmpty().trim().lowercase(), flags, recheck = recheckRaw?.trim() == "1")
+            return ChildFetch(flags, stats)
         }
     }
 }
