@@ -74,7 +74,7 @@ class AccessibilityTreeParserTest {
         }
 
         for (i in children.indices) {
-            every { node.getChild(i) } returns children[i]
+            every { node.getChild(i, AccessibilityTreeParser.CHILD_PREFETCH_STRATEGY) } returns children[i]
         }
 
         @Suppress("DEPRECATION")
@@ -148,6 +148,28 @@ class AccessibilityTreeParserTest {
             assertNull(result.text)
             assertNull(result.contentDescription)
             assertNull(result.resourceId)
+        }
+
+        @Test
+        @DisplayName("fetches children with uninterruptible descendant prefetch and never refreshes them")
+        fun fetchesChildrenWithBatchedPrefetchWithoutRefresh() {
+            // Arrange: a child without resource id used to be refresh()ed, one extra IPC per node
+            val child = createMockNode(className = "android.view.View", resourceId = null)
+            val parent = createMockNode(childCount = 1, children = listOf(child))
+
+            // Act
+            parser.parseTree(parent)
+
+            // Assert
+            verify(exactly = 1) {
+                parent.getChild(
+                    0,
+                    AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_DEPTH_FIRST or
+                        AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE,
+                )
+            }
+            verify(exactly = 0) { parent.getChild(any()) }
+            verify(exactly = 0) { child.refresh() }
         }
 
         @Test

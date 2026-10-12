@@ -151,19 +151,15 @@ class AccessibilityTreeParser
             val children = mutableListOf<AccessibilityNodeData>()
             val childCount = node.childCount
             for (i in 0 until childCount) {
-                val childNode = node.getChild(i)
+                // Every caller clears the framework node cache before parsing (see
+                // getFreshWindowsLocked), so a cache hit here was fetched live during this read and
+                // needs no refresh(). On a miss, ask the app for this child plus up to
+                // MAX_NUMBER_OF_PREFETCHED_NODES (50) descendants in ONE reply; UNINTERRUPTIBLE keeps
+                // the batch from being cut short by our own next request, so siblings and
+                // grandchildren are then served from the cache instead of one main-thread round
+                // trip each.
+                val childNode = node.getChild(i, CHILD_PREFETCH_STRATEGY)
                 if (childNode != null) {
-                    // Refresh nodes that are likely virtual (Compose, WebView, custom
-                    // AccessibilityNodeProvider implementations). Virtual nodes can
-                    // return stale cached data after recomposition/DOM changes.
-                    // - No viewIdResourceName: virtual nodes typically lack resource IDs
-                    // - Compose extra data key: definitive marker for Compose virtual nodes
-                    // Nodes with a resource ID are real Views and don't need refresh.
-                    if (childNode.viewIdResourceName == null ||
-                        childNode.availableExtraData.contains(COMPOSE_SEMANTICS_ID_KEY)
-                    ) {
-                        childNode.refresh()
-                    }
                     children.add(
                         parseNode(
                             node = childNode,
@@ -272,6 +268,9 @@ class AccessibilityTreeParser
              * virtual accessibility node. Present in [AccessibilityNodeInfo.getAvailableExtraData].
              */
             internal const val COMPOSE_SEMANTICS_ID_KEY = "androidx.compose.ui.semantics.id"
+            internal const val CHILD_PREFETCH_STRATEGY =
+                AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_DEPTH_FIRST or
+                    AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE
 
             /** Maps [AccessibilityWindowInfo] type constants to human-readable labels. */
             fun mapWindowType(type: Int): String =
