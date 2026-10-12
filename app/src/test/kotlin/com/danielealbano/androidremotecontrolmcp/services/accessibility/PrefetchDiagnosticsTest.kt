@@ -239,7 +239,7 @@ class PrefetchDiagnosticsTest {
             stats.log("com.example")
 
             assertEquals(2, lines.size)
-            assertTrue(lines[0].startsWith("read pkg=com.example strategy=dfs flags=40 calls=1 misses=1"))
+            assertTrue(lines[0].startsWith("read pkg=com.example strategy=dfs flags=40 recheck=false calls=1 misses=1"))
             assertTrue(lines[1].startsWith("class cls=com.example.Cell misses=1"))
             assertTrue(lines.none { "secret" in it })
         }
