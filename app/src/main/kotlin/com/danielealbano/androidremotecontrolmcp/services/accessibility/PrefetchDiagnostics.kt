@@ -109,16 +109,30 @@ internal class PrefetchStats(
     ): Boolean {
         getChildCalls++
         histogram[HISTOGRAM_BOUNDS_NS.count { elapsedNs >= it }]++
-        if (child == null) {
-            nullChildren++
-            return false
+        val fromCache = child != null && elapsedNs < MISS_THRESHOLD_NS
+        when {
+            child == null -> {
+                nullChildren++
+            }
+
+            fromCache -> {
+                hits++
+                lastMissClass?.let { it.served++ }
+            }
+
+            else -> {
+                recordMiss(parent, parentFromCache, child, elapsedNs)
+            }
         }
-        val isMiss = elapsedNs >= MISS_THRESHOLD_NS
-        if (!isMiss) {
-            hits++
-            lastMissClass?.let { it.served++ }
-            return true
-        }
+        return fromCache
+    }
+
+    private fun recordMiss(
+        parent: AccessibilityNodeInfo,
+        parentFromCache: Boolean,
+        child: AccessibilityNodeInfo,
+        elapsedNs: Long,
+    ) {
         misses++
         missNs += elapsedNs
         val cs = byClass.getOrPut(child.className?.toString() ?: "null") { ClassStats() }
@@ -138,7 +152,6 @@ internal class PrefetchStats(
         if (child.isVisibleToUser) cs.visible++
         if (child.childCount > 0) cs.withChildren++
         if (parentFromCache) cs.parentFromCache++
-        return false
     }
 
     fun log(packageName: String?) {
