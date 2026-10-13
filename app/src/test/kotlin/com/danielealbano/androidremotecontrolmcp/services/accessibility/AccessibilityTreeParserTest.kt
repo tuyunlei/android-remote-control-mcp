@@ -720,4 +720,75 @@ class AccessibilityTreeParserTest {
             assertNull(result.labeledByText)
         }
     }
+
+    @Nested
+    @DisplayName("concurrent child fetch")
+    inner class ConcurrentChildFetch {
+        /** Root -> [containers] containers -> [leaves] TextView leaves each, all with distinct bounds and text. */
+        private fun wideFlatTree(
+            containers: Int,
+            leaves: Int,
+        ): AccessibilityNodeInfo {
+            val boxes =
+                List(containers) { c ->
+                    val texts =
+                        List(leaves) { r ->
+                            createMockNode(
+                                text = "item $c.$r",
+                                boundsTop = (c * leaves + r) * 10,
+                                boundsBottom = (c * leaves + r) * 10 + 10,
+                            )
+                        }
+                    createMockNode(
+                        className = "android.widget.LinearLayout",
+                        boundsTop = c * leaves * 10,
+                        boundsBottom = (c + 1) * leaves * 10,
+                        childCount = leaves,
+                        children = texts,
+                    )
+                }
+            return createMockNode(
+                className = "android.widget.ScrollView",
+                boundsBottom = containers * leaves * 10,
+                childCount = containers,
+                children = boxes,
+            )
+        }
+
+        @Test
+        @DisplayName("produces the same tree and node map as a serial walk")
+        fun sameTreeAsSerialWalk() {
+            val root = wideFlatTree(containers = 7, leaves = 22)
+            val serial = AccessibilityTreeParser(ConcurrentChildFetcher()) { "1" }
+            val concurrent = AccessibilityTreeParser(ConcurrentChildFetcher()) { "16" }
+            val serialMap = mutableMapOf<String, CachedNode>()
+            val concurrentMap = mutableMapOf<String, CachedNode>()
+
+            val serialTree = serial.parseTree(root, "root_w1", serialMap)
+            val concurrentTree = concurrent.parseTree(root, "root_w1", concurrentMap)
+
+            assertEquals(serialTree, concurrentTree)
+            assertEquals(7, concurrentTree.children.size)
+            assertEquals("item 6.21", concurrentTree.children[6].children[21].text)
+            assertEquals(serialMap.keys.toList(), concurrentMap.keys.toList())
+            assertEquals(1 + 7 + 7 * 22, concurrentMap.size)
+        }
+
+        @Test
+        @DisplayName("keeps the original child index in node ids when a child is null")
+        fun keepsIndexAcrossNullChild() {
+            val second = createMockNode(text = "second")
+            val parent = createMockNode(childCount = 2)
+            every { parent.getChild(0, AccessibilityTreeParser.CHILD_PREFETCH_STRATEGY) } returns null
+            every { parent.getChild(1, AccessibilityTreeParser.CHILD_PREFETCH_STRATEGY) } returns second
+            val concurrent = AccessibilityTreeParser(ConcurrentChildFetcher()) { "16" }
+
+            val tree = concurrent.parseTree(parent)
+
+            assertEquals(1, tree.children.size)
+            val expectedId =
+                concurrent.generateNodeId(second, BoundsData(0, 0, 100, 50), depth = 1, index = 1, parentId = tree.id)
+            assertEquals(expectedId, tree.children[0].id)
+        }
+    }
 }

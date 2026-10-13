@@ -19,11 +19,18 @@ import javax.inject.Inject
  * The root node passed to [parseTree] is NOT recycled by the parser — the caller retains
  * ownership. When [nodeMap] is provided, the root IS stored in the map.
  *
- * This class is Hilt-injectable and stateless (no injected cache, no internal mutable state).
+ * This class is Hilt-injectable and stateless (no injected cache, no internal mutable state). Children
+ * of a node are fetched with [ConcurrentChildFetcher] (cache misses in parallel); the walk itself,
+ * node ids and child order stay on the calling thread and are identical to a serial walk.
  */
 class AccessibilityTreeParser
-    @Inject
-    constructor() {
+    internal constructor(
+        private val childFetcher: ConcurrentChildFetcher,
+        private val parallelismSource: () -> String?,
+    ) {
+        @Inject
+        constructor() : this(ConcurrentChildFetcher(), ConcurrentChildFetcher::readParallelismProperty)
+
         /**
          * Parses the full accessibility tree starting from [rootNode].
          *
@@ -49,6 +56,7 @@ class AccessibilityTreeParser
                 parentId = rootParentId,
                 recycleNode = false,
                 nodeMap = nodeMap,
+                parallelism = ConcurrentChildFetcher.parallelismFrom(parallelismSource()),
             )
 
         /**
@@ -63,6 +71,7 @@ class AccessibilityTreeParser
          * @param nodeMap Optional output map for caching real node references. When non-null, the node
          *   is stored as a [CachedNode] and child nodes are not recycled. When null, nodes are recycled
          *   after data extraction per the original behavior.
+         * @param parallelism Max concurrent child fetches per node (see [ConcurrentChildFetcher]).
          * @return The parsed node as [AccessibilityNodeData].
          */
         @Suppress("LongParameterList", "LongMethod")
@@ -73,6 +82,7 @@ class AccessibilityTreeParser
             parentId: String,
             recycleNode: Boolean = true,
             nodeMap: MutableMap<String, CachedNode>? = null,
+            parallelism: Int = ConcurrentChildFetcher.DEFAULT_PARALLELISM,
         ): AccessibilityNodeData {
             val rect = Rect()
             node.getBoundsInScreen(rect)
@@ -149,16 +159,15 @@ class AccessibilityTreeParser
             }
 
             val children = mutableListOf<AccessibilityNodeData>()
-            val childCount = node.childCount
-            for (i in 0 until childCount) {
-                // Every caller clears the framework node cache before parsing (see
-                // getFreshWindowsLocked), so a cache hit here was fetched live during this read and
-                // needs no refresh(). On a miss, ask the app for this child plus up to
-                // MAX_NUMBER_OF_PREFETCHED_NODES (50) descendants in ONE reply; UNINTERRUPTIBLE keeps
-                // the batch from being cut short by our own next request, so siblings and
-                // grandchildren are then served from the cache instead of one main-thread round
-                // trip each.
-                val childNode = node.getChild(i, CHILD_PREFETCH_STRATEGY)
+            // Every caller clears the framework node cache before parsing (see
+            // getFreshWindowsLocked), so a cache hit here was fetched live during this read and
+            // needs no refresh(). On a miss, ask the app for the child plus up to
+            // MAX_NUMBER_OF_PREFETCHED_NODES (50) descendants in ONE reply; UNINTERRUPTIBLE keeps
+            // the batch from being cut short by our own next request. Leaves beyond that cap are
+            // still one round trip each, so all children of this node are requested together and
+            // the app answers them after one frame instead of one frame per child.
+            val childNodes = childFetcher.fetch(node, node.childCount, parallelism)
+            childNodes.forEachIndexed { i, childNode ->
                 if (childNode != null) {
                     children.add(
                         parseNode(
@@ -168,6 +177,7 @@ class AccessibilityTreeParser
                             parentId = nodeId,
                             recycleNode = nodeMap == null,
                             nodeMap = nodeMap,
+                            parallelism = parallelism,
                         ),
                     )
                 }
