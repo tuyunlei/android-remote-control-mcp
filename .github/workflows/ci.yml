@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, batched-prefetch]
+    branches: [main, batched-prefetch, concurrent-walk]
   pull_request:
     branches: [main]
 
