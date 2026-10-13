@@ -409,8 +409,11 @@ jobs:
             echo "keyPassword=$RELEASE_KEY_PASSWORD"
           } > "$GITHUB_WORKSPACE/keystore.properties"
 
+      # Fork only: explicit versionCode so this branch installs in place over the diag-prefetch
+      # build (20009420) on a user-build phone, where adb cannot downgrade. Any later build meant
+      # to replace it (including a rollback build) must pass a higher -PVERSION_CODE.
       - name: Build ${{ matrix.label }} debug + release APKs
-        run: ./gradlew assemble${{ matrix.cap }}Debug assemble${{ matrix.cap }}Release
+        run: ./gradlew -PVERSION_CODE=20009500 assemble${{ matrix.cap }}Debug assemble${{ matrix.cap }}Release
 
       - name: Upload ${{ matrix.label }} debug APK
         uses: actions/upload-artifact@v7
