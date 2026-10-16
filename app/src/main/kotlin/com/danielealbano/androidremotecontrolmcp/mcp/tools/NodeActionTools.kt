@@ -610,6 +610,96 @@ class ScrollToNodeTool
         }
     }
 
+/**
+ * MCP tool: scroll_node
+ *
+ * Scrolls the specified node once in the given direction. The node itself must be
+ * scrollable: there is no ancestor search, no retry, no settle delay and no visibility
+ * check. up/left map to ACTION_SCROLL_BACKWARD, down/right to ACTION_SCROLL_FORWARD.
+ */
+class ScrollNodeTool
+    @Inject
+    constructor(
+        private val treeParser: AccessibilityTreeParser,
+        private val actionExecutor: ActionExecutor,
+        private val accessibilityServiceProvider: AccessibilityServiceProvider,
+        private val nodeCache: AccessibilityNodeCache,
+    ) {
+        suspend fun execute(arguments: JsonObject?): CallToolResult {
+            val nodeId =
+                arguments?.get("node_id")?.jsonPrimitive?.contentOrNull
+                    ?: throw McpToolException.InvalidParams("Missing required parameter 'node_id'")
+
+            if (nodeId.isEmpty()) {
+                throw McpToolException.InvalidParams("Parameter 'node_id' must be non-empty")
+            }
+
+            val directionStr = McpToolUtils.requireString(arguments, "direction")
+            val direction = parseDirection(directionStr)
+
+            val multiWindowResult = getFreshWindows(treeParser, accessibilityServiceProvider, nodeCache)
+
+            val result = actionExecutor.scrollNode(nodeId, direction, multiWindowResult.windows)
+            result.onFailure { e -> mapNodeActionException(e, nodeId) }
+
+            Log.d(TAG, "scroll_node: nodeId=$nodeId direction=$directionStr succeeded")
+            return McpToolUtils.textResult("Scrolled node '$nodeId' $directionStr")
+        }
+
+        private fun parseDirection(directionStr: String): ScrollDirection =
+            DIRECTIONS[directionStr]
+                ?: throw McpToolException.InvalidParams(
+                    "Parameter 'direction' must be one of: up, down, left, right. Got: '$directionStr'",
+                )
+
+        fun register(
+            registrar: LoggedToolRegistrar,
+            toolNamePrefix: String,
+        ) {
+            registrar.addTool(
+                toolName = TOOL_NAME,
+                name = "$toolNamePrefix$TOOL_NAME",
+                description =
+                    "Scroll the specified scrollable node once in the given direction " +
+                        "(up/left = backward, down/right = forward). The node itself must be scrollable. " +
+                        "Returns after the scroll action is performed.",
+                inputSchema =
+                    ToolSchema(
+                        properties =
+                            buildJsonObject {
+                                putJsonObject("node_id") {
+                                    put("type", "string")
+                                    put("description", "Node ID from ${toolNamePrefix}find_nodes")
+                                }
+                                putJsonObject("direction") {
+                                    put("type", "string")
+                                    put(
+                                        "enum",
+                                        buildJsonArray {
+                                            DIRECTIONS.keys.forEach { add(JsonPrimitive(it)) }
+                                        },
+                                    )
+                                    put("description", "Scroll direction")
+                                }
+                            },
+                        required = listOf("node_id", "direction"),
+                    ),
+            ) { request -> execute(request.arguments) }
+        }
+
+        companion object {
+            private const val TAG = "MCP:ScrollNodeTool"
+            const val TOOL_NAME = "scroll_node"
+            private val DIRECTIONS =
+                linkedMapOf(
+                    "up" to ScrollDirection.UP,
+                    "down" to ScrollDirection.DOWN,
+                    "left" to ScrollDirection.LEFT,
+                    "right" to ScrollDirection.RIGHT,
+                )
+        }
+    }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared Utilities for Node Action Tools
 // ─────────────────────────────────────────────────────────────────────────────
@@ -847,6 +937,10 @@ fun registerNodeActionTools(
     }
     if (perms.isToolEnabled(ScrollToNodeTool.TOOL_NAME)) {
         ScrollToNodeTool(treeParser, elementFinder, actionExecutor, accessibilityServiceProvider, nodeCache)
+            .register(registrar, toolNamePrefix)
+    }
+    if (perms.isToolEnabled(ScrollNodeTool.TOOL_NAME)) {
+        ScrollNodeTool(treeParser, actionExecutor, accessibilityServiceProvider, nodeCache)
             .register(registrar, toolNamePrefix)
     }
 }

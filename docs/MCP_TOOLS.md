@@ -34,7 +34,7 @@ This document provides a comprehensive reference for all MCP tools available in 
 
 ## Overview
 
-The MCP server exposes 57 tools via the JSON-RPC 2.0 protocol, organized into 14 categories:
+The MCP server exposes 58 tools via the JSON-RPC 2.0 protocol, organized into 14 categories:
 
 | Category | Tools | Plan |
 |----------|-------|------|
@@ -42,7 +42,7 @@ The MCP server exposes 57 tools via the JSON-RPC 2.0 protocol, organized into 14
 | System Actions | `android_press_back`, `android_press_home`, `android_press_recents`, `android_open_notifications`, `android_open_quick_settings`, `android_dismiss_keyboard` | 6 |
 | Touch Actions | `android_tap`, `android_long_press`, `android_double_tap`, `android_swipe`, `android_scroll` | 8 |
 | Gestures | `android_pinch`, `android_custom_gesture` | 8 |
-| Node Actions | `android_find_nodes`, `android_click_node`, `android_long_click_node`, `android_tap_node`, `android_scroll_to_node` | 9, 35 |
+| Node Actions | `android_find_nodes`, `android_click_node`, `android_long_click_node`, `android_tap_node`, `android_scroll_to_node`, `android_scroll_node` | 9, 35 |
 | Text Input | `android_type_append_text`, `android_type_insert_text`, `android_type_replace_text`, `android_type_clear_text`, `android_press_key` | 9, 22 |
 | Utilities | `android_get_clipboard`, `android_set_clipboard`, `android_wait_for_node`, `android_wait_for_idle`, `android_get_node_details` | 9, 15 |
 | File Operations | `android_list_storage_locations`, `android_list_files`, `android_read_file`, `android_write_file`, `android_append_file`, `android_file_replace`, `android_download_from_url`, `android_delete_file` | - |
@@ -1252,6 +1252,43 @@ curl -X POST http://localhost:8080/mcp \
 - **Permission denied**: Accessibility service not enabled
 - **Node not found**: Node not found
 - **Action failed**: No scrollable container found, scroll failed, or node not visible after max attempts (5)
+
+---
+
+### `android_scroll_node`
+
+Scroll the specified node once in the given direction. The node itself must be scrollable: there is no ancestor search, no retry, no settle delay, and no visibility check. `up`/`left` perform `ACTION_SCROLL_BACKWARD`; `down`/`right` perform `ACTION_SCROLL_FORWARD`.
+
+**Input Schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "node_id": { "type": "string", "description": "Node ID from find_nodes" },
+    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" }
+  },
+  "required": ["node_id", "direction"]
+}
+```
+
+**Output**: `"Scrolled node '<node_id>' <direction>"`
+
+**Example**:
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+    "params": { "name": "android_scroll_node", "arguments": { "node_id": "node_abc123", "direction": "down" } }
+  }'
+```
+
+**Error Cases** (returned as `CallToolResult(isError = true)`):
+- **Invalid params**: Missing or empty `node_id`, missing `direction`, or `direction` not one of up/down/left/right
+- **Permission denied**: Accessibility service not enabled
+- **Node not found**: Node not found in accessibility tree
+- **Action failed**: Node is not scrollable, or the scroll action returned false
 
 ---
 

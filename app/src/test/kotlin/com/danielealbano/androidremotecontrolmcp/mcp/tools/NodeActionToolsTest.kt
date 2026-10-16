@@ -15,12 +15,15 @@ import com.danielealbano.androidremotecontrolmcp.services.accessibility.ElementF
 import com.danielealbano.androidremotecontrolmcp.services.accessibility.ElementInfo
 import com.danielealbano.androidremotecontrolmcp.services.accessibility.FindBy
 import com.danielealbano.androidremotecontrolmcp.services.accessibility.ScreenInfo
+import com.danielealbano.androidremotecontrolmcp.services.accessibility.ScrollDirection
 import com.danielealbano.androidremotecontrolmcp.services.accessibility.WindowData
 import com.danielealbano.androidremotecontrolmcp.testutil.PrivacyToolTestDoubles
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.unmockkAll
+import io.mockk.verify
 import io.mockk.verifyOrder
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
@@ -721,6 +724,149 @@ class NodeActionToolsTest {
                     text.contains("Scrolled") || text.contains("scroll"),
                     "Expected scroll result but got: $text",
                 )
+            }
+    }
+
+    @Nested
+    @DisplayName("ScrollNodeTool")
+    inner class ScrollNodeToolTests {
+        private val tool =
+            ScrollNodeTool(mockTreeParser, mockActionExecutor, mockAccessibilityServiceProvider, mockNodeCache)
+
+        private suspend fun assertScrollsOnceWith(
+            directionArg: String,
+            expected: ScrollDirection,
+        ) {
+            coEvery { mockActionExecutor.scrollNode("node_abc", expected, sampleWindows) } returns
+                Result.success(Unit)
+            val params =
+                buildJsonObject {
+                    put("node_id", "node_abc")
+                    put("direction", directionArg)
+                }
+
+            val result = tool.execute(params)
+
+            assertEquals("Scrolled node 'node_abc' $directionArg", extractTextContent(result))
+            verify(exactly = 1) { mockTreeParser.parseTree(mockRootNode, "root_w0", any()) }
+            coVerify(exactly = 1) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            coVerify(exactly = 1) { mockActionExecutor.scrollNode("node_abc", expected, sampleWindows) }
+        }
+
+        @Test
+        fun `up scrolls node once with UP`() = runTest { assertScrollsOnceWith("up", ScrollDirection.UP) }
+
+        @Test
+        fun `down scrolls node once with DOWN`() = runTest { assertScrollsOnceWith("down", ScrollDirection.DOWN) }
+
+        @Test
+        fun `left scrolls node once with LEFT`() = runTest { assertScrollsOnceWith("left", ScrollDirection.LEFT) }
+
+        @Test
+        fun `right scrolls node once with RIGHT`() = runTest { assertScrollsOnceWith("right", ScrollDirection.RIGHT) }
+
+        @Test
+        fun `throws NodeNotFound when node not found`() =
+            runTest {
+                coEvery { mockActionExecutor.scrollNode("node_xyz", ScrollDirection.DOWN, sampleWindows) } returns
+                    Result.failure(NoSuchElementException("Node 'node_xyz' not found"))
+                val params =
+                    buildJsonObject {
+                        put("node_id", "node_xyz")
+                        put("direction", "down")
+                    }
+
+                assertThrows<McpToolException.NodeNotFound> { tool.execute(params) }
+                coVerify(exactly = 1) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws ActionFailed when node not scrollable`() =
+            runTest {
+                coEvery { mockActionExecutor.scrollNode("node_abc", ScrollDirection.UP, sampleWindows) } returns
+                    Result.failure(IllegalStateException("Node 'node_abc' is not scrollable"))
+                val params =
+                    buildJsonObject {
+                        put("node_id", "node_abc")
+                        put("direction", "up")
+                    }
+
+                val exception = assertThrows<McpToolException.ActionFailed> { tool.execute(params) }
+                assertTrue(exception.message!!.contains("Node 'node_abc' is not scrollable"))
+                coVerify(exactly = 1) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws ActionFailed when scroll action returns false`() =
+            runTest {
+                coEvery { mockActionExecutor.scrollNode("node_abc", ScrollDirection.RIGHT, sampleWindows) } returns
+                    Result.failure(RuntimeException("Scroll RIGHT failed on node 'node_abc'"))
+                val params =
+                    buildJsonObject {
+                        put("node_id", "node_abc")
+                        put("direction", "right")
+                    }
+
+                val exception = assertThrows<McpToolException.ActionFailed> { tool.execute(params) }
+                assertTrue(exception.message!!.contains("Scroll RIGHT failed on node 'node_abc'"))
+                coVerify(exactly = 1) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws InvalidParams for missing node_id`() =
+            runTest {
+                val params = buildJsonObject { put("direction", "down") }
+
+                assertThrows<McpToolException.InvalidParams> { tool.execute(params) }
+                coVerify(exactly = 0) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws InvalidParams for empty node_id`() =
+            runTest {
+                val params =
+                    buildJsonObject {
+                        put("node_id", "")
+                        put("direction", "down")
+                    }
+
+                assertThrows<McpToolException.InvalidParams> { tool.execute(params) }
+                coVerify(exactly = 0) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws InvalidParams for missing direction`() =
+            runTest {
+                val params = buildJsonObject { put("node_id", "node_abc") }
+
+                assertThrows<McpToolException.InvalidParams> { tool.execute(params) }
+                coVerify(exactly = 0) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws InvalidParams for invalid direction`() =
+            runTest {
+                val params =
+                    buildJsonObject {
+                        put("node_id", "node_abc")
+                        put("direction", "forward")
+                    }
+
+                assertThrows<McpToolException.InvalidParams> { tool.execute(params) }
+                coVerify(exactly = 0) { mockActionExecutor.scrollNode(any(), any(), any()) }
+            }
+
+        @Test
+        fun `throws InvalidParams for non-string direction`() =
+            runTest {
+                val params =
+                    buildJsonObject {
+                        put("node_id", "node_abc")
+                        put("direction", 1)
+                    }
+
+                assertThrows<McpToolException.InvalidParams> { tool.execute(params) }
+                coVerify(exactly = 0) { mockActionExecutor.scrollNode(any(), any(), any()) }
             }
     }
 }

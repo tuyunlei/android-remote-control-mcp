@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, batched-prefetch, concurrent-walk]
+    branches: [main, batched-prefetch, concurrent-walk, scroll-node]
   pull_request:
     branches: [main]
 
@@ -413,7 +413,7 @@ jobs:
       # build (20009420) on a user-build phone, where adb cannot downgrade. Any later build meant
       # to replace it (including a rollback build) must pass a higher -PVERSION_CODE.
       - name: Build ${{ matrix.label }} debug + release APKs
-        run: ./gradlew -PVERSION_CODE=20009500 assemble${{ matrix.cap }}Debug assemble${{ matrix.cap }}Release
+        run: ./gradlew -PVERSION_CODE=20009600 assemble${{ matrix.cap }}Debug assemble${{ matrix.cap }}Release
 
       - name: Upload ${{ matrix.label }} debug APK
         uses: actions/upload-artifact@v7

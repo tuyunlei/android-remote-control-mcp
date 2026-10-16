@@ -283,6 +283,7 @@ class ToolPermissionsIntegrationTest {
                 "long_click_node",
                 "tap_node",
                 "scroll_to_node",
+                "scroll_node",
                 "type_append_text",
                 "type_insert_text",
                 "type_replace_text",

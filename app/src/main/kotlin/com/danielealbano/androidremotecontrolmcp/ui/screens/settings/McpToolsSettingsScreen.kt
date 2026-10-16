@@ -108,6 +108,7 @@ private val ALL_TOOL_CATEGORIES: List<ToolCategory> =
                 ToolEntry("long_click_node", "Long Click Node"),
                 ToolEntry("tap_node", "Tap Node"),
                 ToolEntry("scroll_to_node", "Scroll to Node"),
+                ToolEntry("scroll_node", "Scroll Node"),
             ),
         ),
         ToolCategory(
