@@ -12,6 +12,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -21,6 +22,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.TextView
+import com.danielealbano.androidremotecontrolmcp.services.screencapture.ScreenshotPacer
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -50,6 +52,10 @@ class McpAccessibilityService : AccessibilityService() {
     private var cacheInvalidationDebouncer: CacheInvalidationDebouncer? = null
 
     private var toolCallIndicatorView: View? = null
+
+    // One per service connection: the framework's screenshot interval is tracked per connection.
+    private val screenshotPacer =
+        ScreenshotPacer(ScreenshotPacer.FRAMEWORK_MIN_INTERVAL_MS) { SystemClock.uptimeMillis() }
 
     @Volatile
     private var currentPackageName: String? = null
@@ -338,6 +344,9 @@ class McpAccessibilityService : AccessibilityService() {
      * @return Bitmap of the screenshot, or null if capture failed or timed out.
      */
     suspend fun takeScreenshotBitmap(timeoutMs: Long = SCREENSHOT_TIMEOUT_MS): Bitmap? =
+        screenshotPacer.paced { takeScreenshotBitmapNow(timeoutMs) }
+
+    private suspend fun takeScreenshotBitmapNow(timeoutMs: Long): Bitmap? =
         withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine { continuation ->
                 val executor = Executor { it.run() }
