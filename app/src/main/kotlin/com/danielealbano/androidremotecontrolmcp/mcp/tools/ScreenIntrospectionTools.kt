@@ -72,6 +72,7 @@ class GetScreenStateHandler
 
         suspend fun execute(arguments: JsonObject?): CallToolResult {
             val includeScreenshot = parseIncludeScreenshot(arguments)
+            val annotate = arguments?.get("annotate")?.jsonPrimitive?.booleanOrNull ?: true
             val cursorElement = arguments?.get("cursor")
             // Absent, JSON null, or a blank string ⇒ fresh cursorless capture (settled behavior 1).
             // A present, non-blank value (INCLUDING a non-primitive object/array) ⇒ paged path,
@@ -81,7 +82,7 @@ class GetScreenStateHandler
                     cursorElement is JsonNull ||
                     ((cursorElement as? JsonPrimitive)?.contentOrNull?.isBlank() == true)
             return if (isFresh) {
-                handleFreshRequest(includeScreenshot)
+                handleFreshRequest(includeScreenshot, annotate)
             } else {
                 McpToolUtils.untrustedTextResult(buildPagedText(cursorElement, includeScreenshot))
             }
@@ -94,7 +95,10 @@ class GetScreenStateHandler
                 false
             }
 
-        private suspend fun handleFreshRequest(includeScreenshot: Boolean): CallToolResult {
+        private suspend fun handleFreshRequest(
+            includeScreenshot: Boolean,
+            annotate: Boolean,
+        ): CallToolResult {
             // getFreshWindows clears the framework accessibility cache before reading (see there),
             // so this fresh capture — and the node cache it populates for element/action tools —
             // round-trips live even for stale-prone WebView content.
@@ -113,7 +117,7 @@ class GetScreenStateHandler
             val compactOutput = buildFreshPageText(result, screenInfo, totalKept, totalPages)
             Log.d(TAG, "get_screen_state: includeScreenshot=$includeScreenshot pages=$totalPages")
             return if (includeScreenshot) {
-                buildScreenshotResult(result, screenInfo, compactOutput, processed.flaggedBounds)
+                buildScreenshotResult(result, screenInfo, compactOutput, processed.flaggedBounds, annotate)
             } else {
                 McpToolUtils.untrustedTextResult(compactOutput)
             }
@@ -174,6 +178,10 @@ class GetScreenStateHandler
         /**
          * Captures, annotates, and encodes the screenshot, returning a text+image result.
          *
+         * With [annotate] false the masked frame is encoded without boxes or labels, so a caller
+         * that draws its own marks (e.g. its own ids for the nodes it offers) gets clean pixels.
+         * Redaction masking applies either way.
+         *
          * NOTE: There is an inherent timing gap between tree parsing and screenshot capture.
          * If the UI changes in between, bounding boxes may reference stale element positions.
          * Atomic capture is not possible with the current Android accessibility APIs.
@@ -184,6 +192,7 @@ class GetScreenStateHandler
             screenInfo: ScreenInfo,
             compactOutput: String,
             flaggedBounds: List<BoundsData>,
+            annotate: Boolean,
         ): CallToolResult {
             if (!screenCaptureProvider.isScreenCaptureAvailable()) {
                 throw McpToolException.PermissionDenied(
@@ -210,22 +219,24 @@ class GetScreenStateHandler
                 screenshotRedactor.mask(resizedBitmap, flaggedBounds, screenInfo.width, screenInfo.height)
             var annotatedBitmap: Bitmap? = null
             try {
-                // Collect on-screen elements from ALL windows' trees
-                val onScreenElements = collectOnScreenElements(result.windows)
+                if (annotate) {
+                    // Collect on-screen elements from ALL windows' trees
+                    val onScreenElements = collectOnScreenElements(result.windows)
 
-                // Annotate the (masked) screenshot with bounding boxes
-                annotatedBitmap =
-                    screenshotAnnotator.annotate(
-                        maskedBitmap,
-                        onScreenElements,
-                        screenInfo.width,
-                        screenInfo.height,
-                    )
+                    // Annotate the (masked) screenshot with bounding boxes
+                    annotatedBitmap =
+                        screenshotAnnotator.annotate(
+                            maskedBitmap,
+                            onScreenElements,
+                            screenInfo.width,
+                            screenInfo.height,
+                        )
+                }
 
-                // Encode annotated bitmap to base64 JPEG
+                // Encode the annotated (or, unannotated, the masked) bitmap to base64 JPEG
                 val screenshotData =
                     screenshotEncoder.bitmapToScreenshotData(
-                        annotatedBitmap,
+                        annotatedBitmap ?: maskedBitmap,
                         ScreenCaptureProvider.DEFAULT_QUALITY,
                     )
 
@@ -305,6 +316,16 @@ class GetScreenStateHandler
                                                 "Only request when the UI node list is not sufficient.",
                                         )
                                         put("default", false)
+                                    }
+                                    putJsonObject("annotate") {
+                                        put("type", "boolean")
+                                        put(
+                                            "description",
+                                            "Draw node bounding boxes and node id labels on the screenshot. " +
+                                                "Set false for the unannotated (still privacy-masked) image. " +
+                                                "Ignored without include_screenshot.",
+                                        )
+                                        put("default", true)
                                     }
                                 }
                                 putJsonObject("cursor") {

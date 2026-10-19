@@ -417,6 +417,45 @@ class PrivacyModeIntegrationTest {
             }
         }
 
+    @Test
+    fun `unannotated screenshot is still the masked copy`() =
+        runTest {
+            val deps = McpIntegrationTestHelper.createMockDependencies()
+            McpIntegrationTestHelper.setPrivacy(deps, deterministicEnabled, PrivacyModeStatus.ReadyDeterministicOnly)
+            deps.setupTree(treeWith("john@example.com"))
+            every { deps.screenCaptureProvider.isScreenCaptureAvailable() } returns true
+
+            val resized = mockk<Bitmap>(relaxed = true)
+            val masked = mockk<Bitmap>(relaxed = true)
+            coEvery { deps.screenCaptureProvider.captureScreenshotBitmap(any(), any()) } returns Result.success(resized)
+            every { resized.copy(Bitmap.Config.ARGB_8888, true) } returns masked
+            every { masked.width } returns 1080
+            every { masked.height } returns 2400
+
+            mockkConstructor(Canvas::class)
+            every { anyConstructed<Canvas>().drawRect(any<RectF>(), any()) } just Runs
+
+            every { deps.screenshotEncoder.bitmapToScreenshotData(any(), any()) } returns
+                ScreenshotData(data = "dGVzdA==", width = 700, height = 500)
+
+            try {
+                McpIntegrationTestHelper.withTestApplication(deps) { client, _ ->
+                    val result =
+                        client.callTool(
+                            name = "android_get_screen_state",
+                            arguments = mapOf("include_screenshot" to true, "annotate" to false),
+                        )
+                    assertNotEquals(true, result.isError)
+                }
+                // Turning annotation off must not turn masking off: the masked copy is what is encoded.
+                verify(exactly = 0) { deps.screenshotAnnotator.annotate(any(), any(), any(), any()) }
+                verify { deps.screenshotEncoder.bitmapToScreenshotData(masked, any()) }
+                verify(exactly = 0) { deps.screenshotEncoder.bitmapToScreenshotData(resized, any()) }
+            } finally {
+                unmockkConstructor(Canvas::class)
+            }
+        }
+
     private suspend fun screenStateText(client: Client): String {
         val result = client.callTool(name = "android_get_screen_state", arguments = emptyMap())
         return (result.content[0] as TextContent).text

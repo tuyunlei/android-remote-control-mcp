@@ -114,6 +114,10 @@ class ToolPermissionsIntegrationTest {
                     properties?.containsKey("include_screenshot") == true,
                     "include_screenshot should be absent from schema when disabled",
                 )
+                assertFalse(
+                    properties?.containsKey("annotate") == true,
+                    "annotate only qualifies a screenshot, so it is absent when screenshots are disabled",
+                )
             }
         }
 

@@ -309,6 +309,72 @@ class ScreenIntrospectionToolsTest {
             }
 
         @Test
+        @DisplayName("annotates the screenshot by default")
+        fun annotatesScreenshotByDefault() =
+            runTest {
+                setupReadyService()
+                every { mockScreenCaptureProvider.isScreenCaptureAvailable() } returns true
+                val mockBitmap = mockk<Bitmap>(relaxed = true)
+                val mockAnnotatedBitmap = mockk<Bitmap>(relaxed = true)
+                coEvery {
+                    mockScreenCaptureProvider.captureScreenshotBitmap(any(), any())
+                } returns Result.success(mockBitmap)
+                every {
+                    mockScreenshotAnnotator.annotate(any(), any(), any(), any())
+                } returns mockAnnotatedBitmap
+                every {
+                    mockScreenshotEncoder.bitmapToScreenshotData(any(), any())
+                } returns ScreenshotData(data = "base64data", width = 700, height = 500)
+
+                handler.execute(buildJsonObject { put("include_screenshot", true) })
+
+                verify(exactly = 1) { mockScreenshotAnnotator.annotate(mockBitmap, any(), 1080, 2400) }
+                verify(exactly = 1) { mockScreenshotEncoder.bitmapToScreenshotData(mockAnnotatedBitmap, any()) }
+            }
+
+        @Test
+        @DisplayName("annotate=false encodes the unannotated frame and draws nothing")
+        fun annotateFalseEncodesUnannotatedFrame() =
+            runTest {
+                setupReadyService()
+                every { mockScreenCaptureProvider.isScreenCaptureAvailable() } returns true
+                val mockBitmap = mockk<Bitmap>(relaxed = true)
+                coEvery {
+                    mockScreenCaptureProvider.captureScreenshotBitmap(any(), any())
+                } returns Result.success(mockBitmap)
+                every {
+                    mockScreenshotEncoder.bitmapToScreenshotData(any(), any())
+                } returns ScreenshotData(data = "cleandata", width = 700, height = 500)
+
+                val result =
+                    handler.execute(
+                        buildJsonObject {
+                            put("include_screenshot", true)
+                            put("annotate", false)
+                        },
+                    )
+
+                assertEquals(2, result.content.size)
+                assertEquals(sampleCompactOutput, stripUntrustedWarning((result.content[0] as TextContent).text))
+                assertEquals("cleandata", (result.content[1] as ImageContent).data)
+                verify(exactly = 0) { mockScreenshotAnnotator.annotate(any(), any(), any(), any()) }
+                // No flagged bounds in this tree, so the masked frame is the captured one.
+                verify(exactly = 1) { mockScreenshotEncoder.bitmapToScreenshotData(mockBitmap, any()) }
+            }
+
+        @Test
+        @DisplayName("annotate without include_screenshot returns text only")
+        fun annotateWithoutScreenshotReturnsTextOnly() =
+            runTest {
+                setupReadyService()
+
+                val result = handler.execute(buildJsonObject { put("annotate", false) })
+
+                assertEquals(1, result.content.size)
+                coVerify(exactly = 0) { mockScreenCaptureProvider.captureScreenshotBitmap(any(), any()) }
+            }
+
+        @Test
         @DisplayName("throws PermissionDenied when accessibility service not ready")
         fun throwsPermissionDeniedWhenAccessibilityServiceNotReady() =
             runTest {
